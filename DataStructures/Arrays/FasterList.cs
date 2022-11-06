@@ -172,6 +172,20 @@ namespace Svelto.DataStructures
             Array.Copy(items, 0, _buffer, _count, count);
             _count += count;
         }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddRange(ReadOnlyMemory<T> items)
+        {
+            var count = (uint)_buffer.Length;
+            if (items.Length == 0) return;
+
+            if (_count + count > _buffer.Length)
+                AllocateMore(_count + count);
+
+            var copyToMemory = new Memory<T>(_buffer, (int)_count, (int)count);
+            items.CopyTo(copyToMemory);
+            _count += count;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AddRange(T[] items)

@@ -92,7 +92,7 @@ namespace Svelto.Common.DataStructures
         readonly uint _capacity;
 
 #if UNITY_COLLECTIONS || UNITY_JOBS || UNITY_BURST
-#if UNITY_BURST
+#if UNITY_BURST && !UNITY_BURST_IGNORE
         [Unity.Burst.NoAlias]
 #endif
         [Unity.Collections.LowLevel.Unsafe.NativeDisableUnsafePtrRestriction]

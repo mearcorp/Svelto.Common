@@ -31,9 +31,9 @@ namespace Svelto.Common
 
     public static class TypeHash<T>
     {
-#if !UNITY_BURST
+#if !UNITY_BURST || UNITY_BURST_IGNORE
         public static readonly int hash = TypeCache<T>.type.GetHashCode();
-#else
+#elif !UNITY_BURST_IGNORE
         public static readonly int hash = Unity.Burst.BurstRuntime.GetHashCode32<T>();
 #endif
     }

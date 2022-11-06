@@ -1,10 +1,7 @@
 {
     "name": "Svelto.Common",
     "rootNamespace": "",
-    "references": [
-        "Unity.Collections",
-        "Unity.Burst"
-    ],
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,

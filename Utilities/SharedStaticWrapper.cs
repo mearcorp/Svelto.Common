@@ -3,7 +3,7 @@
     //Note: SharedStatic MUST always be initialised outside burst otherwise undefined behaviour will happen
     public struct SharedStaticWrapper<T, Key> where T : unmanaged
     {
-#if UNITY_BURST
+#if UNITY_BURST && !UNITY_BURST_IGNORE
         static readonly Unity.Burst.SharedStatic<T> uniqueContextID = Unity.Burst.SharedStatic<T>.GetOrCreate<Key>();
 
         public ref T Data => ref uniqueContextID.Data;

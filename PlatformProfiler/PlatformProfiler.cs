@@ -4,8 +4,8 @@ namespace Svelto.Common
 {
     public interface IPlatformProfiler: IDisposable
     {
-        DisposableSampler Sample(string samplerName, string samplerInfo = null);
-        DisposableSampler Sample<W>(W sampled, string samplerInfo = null);
+        DisposableSampler Sample(string samplerName);
+        DisposableSampler Sample<W>(W sampled);
     }
     
 #if !ENABLE_PLATFORM_PROFILER
@@ -13,6 +13,8 @@ namespace Svelto.Common
     {
         public void Dispose()
         {}
+
+        public PauseProfiler Yield() { return default; }
     }
     
     public struct PlatformProfilerMT : IPlatformProfiler
@@ -20,14 +22,14 @@ namespace Svelto.Common
         public PlatformProfilerMT(string info)
         {}
         
-        public DisposableSampler Sample(string samplerName, string samplerInfo = null)
+        public DisposableSampler Sample(string samplerName)
         {
-            return new DisposableSampler();
+            return default;
         }
 
-        public DisposableSampler Sample<T>(T sampled, string samplerInfo = null)
+        public DisposableSampler Sample<T>(T sampled)
         {
-            return new DisposableSampler();
+            return default;
         }
 
         public void Dispose()
@@ -39,18 +41,27 @@ namespace Svelto.Common
         public PlatformProfiler(string info)
         {}
 
-        public DisposableSampler Sample(string samplerName, string samplerInfo = null)
+        public DisposableSampler Sample(string samplerName)
         {
-            return new DisposableSampler();
+            return default;
         }
         
-        public DisposableSampler Sample<T>(T samplerName, string samplerInfo = null)
+        public DisposableSampler Sample<T>(T samplerName)
         {
-            return new DisposableSampler();
+            return default;
         }
+        
+        public PauseProfiler Yield() { return default; }
 
         public void Dispose()
         {}
     }
+    
+    public readonly struct PauseProfiler : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
 #endif
 }

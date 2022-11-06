@@ -1,20 +1,19 @@
+#if DEBUG && !PROFILE_SVELTO
+#define ENABLE_DEBUG_CHECKS
+#endif
+
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using DBC.Common;
+using Svelto.Common;
 
 namespace Svelto.DataStructures
 {
+    //Note: the burst compatible version of a dynamic array is found in Svelto.ECS and is called NativeDynamicArray/Cast
     public class FasterList<T>
     {
-        internal static readonly FasterList<T> DefaultEmptyList = new FasterList<T>();
-        
-        public int count => (int) _count;
-        public uint capacity => (uint) _buffer.Length;
-        
-        public static explicit operator FasterList<T>(T[] array)
-        {
-            return new FasterList<T>(array);
-        }
+        static readonly EqualityComparer<T> _comp = EqualityComparer<T>.Default;
 
         public FasterList()
         {
@@ -30,8 +29,9 @@ namespace Svelto.DataStructures
             _buffer = new T[initialSize];
         }
 
-        public FasterList(int initialSize):this((uint)initialSize)
-        { }
+        public FasterList(int initialSize) : this((uint)initialSize)
+        {
+        }
 
         public FasterList(T[] collection)
         {
@@ -39,7 +39,7 @@ namespace Svelto.DataStructures
 
             Array.Copy(collection, _buffer, collection.Length);
 
-            _count = (uint) collection.Length;
+            _count = (uint)collection.Length;
         }
 
         public FasterList(T[] collection, uint actualSize)
@@ -56,43 +56,49 @@ namespace Svelto.DataStructures
 
             collection.CopyTo(_buffer, 0);
 
-            _count = (uint) collection.Count;
+            _count = (uint)collection.Count;
         }
 
         public FasterList(ICollection<T> collection, int extraSize)
         {
-            _buffer = new T[(uint) collection.Count + (uint)extraSize];
+            _buffer = new T[(uint)collection.Count + (uint)extraSize];
 
             collection.CopyTo(_buffer, 0);
-            
-            _count = (uint) collection.Count;
+
+            _count = (uint)collection.Count;
         }
-        
+
         public FasterList(in FasterList<T> source)
         {
-            _buffer = new T[ source.count];
+            _buffer = new T[source.count];
 
             source.CopyTo(_buffer, 0);
 
-            _count = (uint) source.count;
+            _count = (uint)source.count;
         }
-        
+
         public FasterList(in FasterReadOnlyList<T> source)
         {
-            _buffer = new T[ source.count];
+            _buffer = new T[source.count];
 
             source.CopyTo(_buffer, 0);
 
-            _count = (uint) source.count;
+            _count = (uint)source.count;
         }
-        
+
+        public int count    => (int)_count;
+        public int capacity => _buffer.Length;
+
         public ref T this[int index]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                DBC.Common.Check.Require(index < _count && _count > 0, "out of bound index");
-                return ref _buffer[(uint) index];
+#if ENABLE_DEBUG_CHECKS
+                    if (index >= _count)
+                        throw new Exception($"Fasterlist - out of bound access: index {index} - count {_count}");
+#endif                
+                return ref _buffer[(uint)index];
             }
         }
 
@@ -101,11 +107,14 @@ namespace Svelto.DataStructures
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                DBC.Common.Check.Require(index < _count, "out of bound index");
+#if ENABLE_DEBUG_CHECKS
+                    if (index >= _count)
+                        throw new Exception($"Fasterlist - out of bound access: index {index} - count {_count}");
+#endif                
                 return ref _buffer[index];
             }
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FasterList<T> Add(in T item)
         {
@@ -120,23 +129,34 @@ namespace Svelto.DataStructures
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AddAt(uint location, in T item)
         {
-            ExpandTo(location + 1);
+            EnsureCountIsAtLeast(location + 1);
 
             _buffer[location] = item;
         }
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ref T GetOrCreate(uint location, in Func<T> item)
+        {
+            EnsureCountIsAtLeast(location + 1);
+
+            if (_comp.Equals(this[location], default) == true)
+                this[location] = item();
+
+            return ref this[location];
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FasterList<T> AddRange(in FasterList<T> items)
         {
-            AddRange(items._buffer, (uint) items.count);
+            AddRange(items._buffer, (uint)items.count);
 
             return this;
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FasterList<T> AddRange(in FasterReadOnlyList<T> items)
         {
-            AddRange(items._list._buffer, (uint) items.count);
+            AddRange(items._list._buffer, (uint)items.count);
 
             return this;
         }
@@ -152,129 +172,11 @@ namespace Svelto.DataStructures
             Array.Copy(items, 0, _buffer, _count, count);
             _count += count;
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AddRange(T[] items)
         {
-            AddRange(items, (uint) items.Length);
-        }
-        
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Contains(T item)
-        {
-            var comp = EqualityComparer<T>.Default;
-
-            for (uint index = 0; index < _count; index++)
-                if (comp.Equals(_buffer[index], item))
-                    return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// Careful, you could keep on holding references you don't want to hold to anymore
-        /// Use Clear in case.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void FastClear()
-        {
-#if DEBUG && !PROFILE_SVELTO
-            if (Svelto.Common.TypeCache<T>.type.IsClass)
-                Console.LogWarning(
-                    "Warning: objects held by this list won't be garbage collected. Use ResetToReuse or Clear " +
-                    "to avoid this warning");
-#endif
-            _count = 0;
-        }
-        
-        /// <summary>
-        /// this is a dirtish trick to be able to use the index operator
-        /// before adding the elements through the Add functions
-        /// </summary>
-        /// <typeparam name="U"></typeparam>
-        /// <param name="initialSize"></param>
-        /// <returns></returns>
-        public static FasterList<T> PreFill<U>(uint initialSize) where U: T, new()
-        {
-            var list = new FasterList<T>(initialSize);
-
-             if (default(U) == null)
-            {
-                for (int i = 0; i < initialSize; i++)
-                    list._buffer[(uint) (i)] = new U();
-            }
-
-            return list;
-        }
-
-        public static FasterList<T> Fill<U>(uint initialSize) where U: T, new()
-        {
-            var list = PreFill<U>(initialSize);
-
-            list._count = initialSize;
-
-            return list;
-        }
-        
-        public static FasterList<T> PreInit(uint initialSize)
-        {
-            var list = new FasterList<T>(initialSize);
-
-            list._count = initialSize;
-
-            return list;
-        }
-        
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void ResetToReuse()
-        {
-            _count = 0;
-        }
-
-        public bool ReuseOneSlot<U>(out U result) where U:T 
-        {
-            if (_count >= _buffer.Length)
-            {
-                result = default(U);
-                
-                return false;
-            }
-
-            if (default(U) == null)
-            {
-                result = (U) _buffer[_count];
-
-                if (result != null)
-                {
-                    _count++;
-                    return true;
-                }
-                return false;
-            }
-
-            _count++;
-            result = default(U);
-            return true;
-        }
-        
-        public bool ReuseOneSlot<U>() where U: T
-        {
-            if (_count >= _buffer.Length)
-                return false;
-
-            _count++;
-
-            return true;
-        }
-        
-        public bool ReuseOneSlot()
-        {
-            if (_count >= _buffer.Length)
-                return false;
-
-            _count++;
-
-            return true;
+            AddRange(items, (uint)items.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -286,28 +188,166 @@ namespace Svelto.DataStructures
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FasterListEnumerator<T> GetEnumerator()
+        public bool Contains(T item)
         {
-            return new FasterListEnumerator<T>(_buffer, (uint) count);
+            for (uint index = 0; index < _count; index++)
+                if (_comp.Equals(_buffer[index], item))
+                    return true;
+
+            return false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Insert(int index, in T item)
+        public void CopyTo(T[] array, int arrayIndex)
         {
-            DBC.Common.Check.Require(index <= _count, "out of bound index");
+            Array.Copy(_buffer, 0, array, arrayIndex, count);
+        }
+
+        /// <summary>
+        ///     Careful, you could keep on holding references you don't want to hold to anymore
+        ///     Use Clear in case.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void FastClear()
+        {
+#if DEBUG && !PROFILE_SVELTO
+            if (TypeCache<T>.type.IsClass)
+                Console.LogWarning(
+                    "Warning: objects held by this list won't be garbage collected. Use ResetToReuse or Clear " +
+                    "to avoid this warning");
+#endif
+            _count = 0;
+        }
+
+        public static FasterList<T> Fill<U>(uint initialSize) where U : T, new()
+        {
+            var list = PreFill<U>(initialSize);
+
+            list._count = initialSize;
+
+            return list;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FasterListEnumerator<T> GetEnumerator()
+        {
+            return new FasterListEnumerator<T>(_buffer, (uint)count);
+        }
+
+        public void IncreaseCapacityBy(uint increment)
+        {
+            IncreaseCapacityTo((uint)(_buffer.Length + increment));
+        }
+
+        public void IncreaseCapacityTo(uint newCapacity)
+        {
+            Check.Require(newCapacity > _buffer.Length);
+
+            var newList = new T[newCapacity];
+            if (_count > 0) Array.Copy(_buffer, newList, _count);
+            _buffer = newList;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetCountTo(uint newCount)
+        {
+            if (_buffer.Length < newCount)
+                AllocateMore(newCount);
+
+            _count = newCount;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void EnsureCountIsAtLeast(uint newCount)
+        {
+            if (_buffer.Length < newCount)
+                AllocateMore(newCount);
+
+            if (_count < newCount)
+                _count = newCount;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void IncrementCountBy(uint increment)
+        {
+            var count = _count + increment;
+
+            if (_buffer.Length < count)
+                AllocateMore(count);
+
+            _count = count;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void InsertAt(uint index, in T item)
+        {
+            Check.Require(index <= _count, "out of bound index");
 
             if (_count == _buffer.Length) AllocateMore();
 
             Array.Copy(_buffer, index, _buffer, index + 1, _count - index);
             ++_count;
-            
+
             _buffer[index] = item;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void RemoveAt(int index)
+        public static explicit operator FasterList<T>(T[] array)
         {
-            DBC.Common.Check.Require(index < _count, "out of bound index");
+            return new FasterList<T>(array);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ref readonly T Peek()
+        {
+            return ref _buffer[_count - 1];
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ref readonly T Pop()
+        {
+            --_count;
+            return ref _buffer[_count];
+        }
+
+        /// <summary>
+        ///     this is a dirtish trick to be able to use the index operator
+        ///     before adding the elements through the Add functions
+        /// </summary>
+        /// <typeparam name="U"></typeparam>
+        /// <param name="initialSize"></param>
+        /// <returns></returns>
+        public static FasterList<T> PreFill<U>(uint initialSize) where U : T, new()
+        {
+            var list = new FasterList<T>(initialSize);
+
+            if (default(U) == null)
+                for (var i = 0; i < initialSize; i++)
+                    list._buffer[(uint)i] = new U();
+
+            return list;
+        }
+
+        public static FasterList<T> PreInit(uint initialSize)
+        {
+            var list = new FasterList<T>(initialSize);
+
+            list._count = initialSize;
+
+            return list;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint Push(in T item)
+        {
+            AddAt(_count, item);
+
+            return _count - 1;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void RemoveAt(uint index)
+        {
+            Check.Require(index < _count, "out of bound index");
 
             if (index == --_count)
                 return;
@@ -318,11 +358,64 @@ namespace Svelto.DataStructures
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ResetToReuse()
+        {
+            _count = 0;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Resize(uint newSize)
         {
             if (newSize == _buffer.Length) return;
-            
-            Array.Resize(ref _buffer, (int) newSize);
+
+            Array.Resize(ref _buffer, (int)newSize);
+        }
+
+        public bool ReuseOneSlot<U>(out U result) where U : T
+        {
+            if (_count >= _buffer.Length)
+            {
+                result = default;
+
+                return false;
+            }
+
+            if (default(U) == null)
+            {
+                result = (U)_buffer[_count];
+
+                if (result != null)
+                {
+                    _count++;
+                    return true;
+                }
+
+                return false;
+            }
+
+            _count++;
+            result = default;
+            return true;
+        }
+
+        public bool ReuseOneSlot<U>() where U : T
+        {
+            if (_count >= _buffer.Length)
+                return false;
+
+            _count++;
+
+            return true;
+        }
+
+        public bool ReuseOneSlot()
+        {
+            if (_count >= _buffer.Length)
+                return false;
+
+            _count++;
+
+            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -336,33 +429,16 @@ namespace Svelto.DataStructures
         }
 
         /// <summary>
-        /// This function exists to allow fast iterations. The size of the array returned cannot be
-        /// used. The list count must be used instead.
+        ///     This function exists to allow fast iterations. The size of the array returned cannot be
+        ///     used. The list count must be used instead.
         /// </summary>
         /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public T[] ToArrayFast(out uint count)
+        public T[] ToArrayFast(out int count)
         {
-            count = _count;
+            count = (int)_count;
 
             return _buffer;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool UnorderedRemoveAt(int index)
-        {
-            DBC.Common.Check.Require(index < _count && _count > 0, "out of bound index");
-
-            if (index == --_count)
-            {
-                _buffer[_count] = default;
-                return false;
-            }
-
-            _buffer[(uint) index] = _buffer[_count];
-            _buffer[_count] = default;
-
-            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -375,87 +451,58 @@ namespace Svelto.DataStructures
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void TrimCount(uint newCount)
         {
-            DBC.Common.Check.Require(_count >= newCount, "the new length must be less than the current one");
+            Check.Require(_count >= newCount, "the new length must be less than the current one");
 
             _count = newCount;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void ExpandBy(uint increment)
+        public bool UnorderedRemoveAt(uint index)
         {
-            uint count = _count + increment;
+            Check.Require(index < _count && _count > 0, "out of bound index");
 
-            if (_buffer.Length < count)
-                AllocateMore(count);
+            if (index == --_count)
+            {
+                _buffer[_count] = default;
+                return false;
+            }
 
-            _count = count;
-        }
+            _buffer[index]  = _buffer[_count];
+            _buffer[_count] = default;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void ExpandTo(uint newSize)
-        {
-            if (_buffer.Length < newSize)
-                AllocateMore(newSize);
-
-            if (_count < newSize)
-                _count = newSize;
-        }
-
-        public void EnsureCapacity(uint newSize)
-        {
-            if (_buffer.Length < newSize)
-                AllocateMore(newSize);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public uint Push(in T item)
-        {
-            AddAt(_count, item);
-
-            return _count - 1;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ref readonly T Pop() 
-        { 
-            --_count;
-            return ref _buffer[_count];
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ref readonly T Peek()
-        {
-            return ref _buffer[_count - 1];
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void CopyTo(T[] array, int arrayIndex)
-        {
-            Array.Copy(_buffer, 0, array, arrayIndex, count);
+            return true;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         void AllocateMore()
         {
-            int newLength = (int) ((_buffer.Length + 1) * 1.5f);
+            var newLength = (int)((_buffer.Length + 1) * 1.5f);
+            var newList   = new T[newLength];
+            if (_count > 0) Array.Copy(_buffer, newList, _count);
+            _buffer = newList;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //Note: maybe I should be sure that the count is always multiple of 4
+        void AllocateMore(uint newSize)
+        {
+            Check.Require(newSize > _buffer.Length);
+            var newLength = (int)(newSize * 1.5f);
+
             var newList = new T[newLength];
             if (_count > 0) Array.Copy(_buffer, newList, _count);
             _buffer = newList;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AllocateMore(uint newSize)
+        void AllocateTo(uint newSize)
         {
-            DBC.Common.Check.Require(newSize > _buffer.Length);
-            int newLength = (int) (newSize * 1.5f);
+            Check.Require(newSize > _buffer.Length);
 
-            var newList = new T[newLength];
+            var newList = new T[newSize];
             if (_count > 0) Array.Copy(_buffer, newList, _count);
             _buffer = newList;
         }
-
-        T[]         _buffer;
-        uint        _count;
 
         public static class NoVirt
         {
@@ -479,5 +526,8 @@ namespace Svelto.DataStructures
                 return fasterList._buffer;
             }
         }
+
+        T[]  _buffer;
+        uint _count;
     }
 }

@@ -15,13 +15,12 @@ namespace Svelto.Common
             _marker.Begin();
         }
 
-#if DISABLE_CHECKS
-		[Conditional("__NEVER_DEFINED__")]
-#endif
         public void Dispose()
         {
             _marker.End();
         }
+        
+        public PauseProfiler Yield() { return new PauseProfiler(_marker); }
     }
 
     public struct PlatformProfilerMT : IPlatformProfiler
@@ -36,14 +35,14 @@ namespace Svelto.Common
             _platformProfilerImplementation.Dispose();
         }
 
-        public DisposableSampler Sample(string samplerName, string samplerInfo = null)
+        public DisposableSampler Sample(string samplerName)
         {
-            return _platformProfilerImplementation.Sample(samplerName, samplerInfo);
+            return _platformProfilerImplementation.Sample(samplerName);
         }
 
-        public DisposableSampler Sample<W>(W sampled, string samplerInfo = null)
+        public DisposableSampler Sample<W>(W sampled)
         {
-            return _platformProfilerImplementation.Sample(sampled, samplerInfo);
+            return _platformProfilerImplementation.Sample(sampled);
         }
 
         PlatformProfiler _platformProfilerImplementation;
@@ -51,33 +50,56 @@ namespace Svelto.Common
 
     public struct PlatformProfiler : IPlatformProfiler
     {
-        readonly ProfilerMarker? maker;
+        readonly ProfilerMarker? _marker;
 
         public PlatformProfiler(string info)
         {
-            maker = new ProfilerMarker(info);
-            maker.Value.Begin();
+            _marker = new ProfilerMarker(info);
+            _marker.Value.Begin();
         }
 
-        public DisposableSampler Sample(string samplerName, string samplerInfo = null)
+        public DisposableSampler Sample(string samplerName)
         {
-#if !PROFILE_SVELTO
-            var name = samplerInfo != null ? samplerName.FastConcat("-", samplerInfo) : samplerName;
-#else
-            var name = samplerName;
-#endif
-            return new DisposableSampler(new ProfilerMarker(name));
+            return new DisposableSampler(new ProfilerMarker(samplerName));
         }
 
-        public DisposableSampler Sample<T>(T sampled, string samplerInfo = null)
+        public DisposableSampler Sample<T>(T sampled)
         {
-            return Sample(sampled.TypeName(), samplerInfo);
+            return Sample(sampled.TypeName());
         }
 
         public void Dispose()
         {
-            maker?.End();
+            _marker?.End();
         }
+
+        public void Pause()
+        {
+            _marker?.End();
+        }
+
+        public void Resume()
+        {
+            _marker.Value.Begin();
+        }
+
+        public PauseProfiler Yield() { return new PauseProfiler(_marker.Value); }
+    }
+
+    public readonly struct PauseProfiler : IDisposable
+    {
+        public PauseProfiler(ProfilerMarker maker)
+        {
+            _maker = maker;
+            _maker.End();
+        }
+
+        public void Dispose()
+        {
+            _maker.Begin();
+        }
+        
+        readonly ProfilerMarker _maker;
     }
 }
 #endif
